@@ -1,0 +1,64 @@
+name: Dev Deployment
+
+on:
+  push:
+    branches:
+      - new-project
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Get image:tag variables
+        id: vars
+        run: |
+          repository=${{ github.repository }}
+          echo "image=${repository,,}" >> $GITHUB_OUTPUT
+          echo "tag=$(echo ${GITHUB_SHA:0:7})" >> $GITHUB_OUTPUT
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker Build
+        run: |
+          docker build -t ghcr.io/${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }} \
+             --build-arg API_TOKEN=${{ secrets.API_TOKEN_DEV }} \
+             --build-arg OPEN_API_KEY=${{ secrets.OPEN_API_KEY_DEV }} \
+             --build-arg OPEN_API_MODEL="gpt-4o" \
+             .
+
+      - name: Docker Push
+        run: docker push ghcr.io/${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+
+      - name: create vault config
+        run: |
+          echo "${{ secrets.SPECINTEL_ANSIBLE_VAULT }}" > vault
+
+      - name: Connect VPN
+        uses: niklaskeerl/easy-wireguard-action@v2
+        with:
+          WG_CONFIG_FILE: ${{ secrets.WG_CONFIG }}
+
+      - name: install ansible
+        run: |
+          pip3 install ansible
+          ansible --version | grep "python version"
+          ansible-galaxy collection install community.docker
+
+      - name: ansible run playbook
+        run: |
+          ansible-playbook ci/playbook.yaml -i ci/hosts.yaml --vault-password-file vault \
+          --extra-vars "github_username=${{ github.actor }}" \
+          --extra-vars "github_token=${{ secrets.GITHUB_TOKEN }}" \
+          --extra-vars "github_image=ghcr.io/${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}" \
+          --extra-vars "env=dev" \
+          --extra-vars "external_port=6000"

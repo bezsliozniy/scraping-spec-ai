@@ -1,0 +1,63 @@
+- name: Update web servers
+  hosts: P-NJ-U-WEB02
+
+  tasks:
+    - name: Install required apps
+      apt: name={{ item }} state=latest update_cache=yes
+      loop:
+        [
+          "vim",
+          "htop",
+          "less",
+          "telnet",
+          "apt-transport-https",
+          "ca-certificates",
+          "curl",
+          "software-properties-common",
+          "net-tools",
+          "gnupg",
+          "lsb-release",
+        ]
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Install docker
+      apt: name={{ item }} update_cache=yes state=latest
+      loop:
+        [
+          "docker-ce",
+          "docker-ce-cli",
+          "containerd.io",
+          "docker-buildx-plugin",
+          "docker-compose-plugin",
+        ]
+
+    - name: Add existing user to group docker
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Log into Github Container Registry
+      community.docker.docker_login:
+        registry_url: ghcr.io
+        username: "{{ github_username }}"
+        password: "{{ github_token }}"
+
+    - name: Container present
+      community.docker.docker_container:
+        name: spec-id-ai-helper-{{ env }}
+        state: started
+        restart: true
+        restart_policy: "unless-stopped"
+        image: "{{ github_image }}"
+        published_ports:
+          - "{{ external_port }}:8000"
