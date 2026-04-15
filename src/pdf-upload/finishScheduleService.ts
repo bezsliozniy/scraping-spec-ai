@@ -40,9 +40,10 @@ export class FinishScheduleService {
   async processPdfFinishSchedule(
     file: Express.Multer.File,
     ocrProcessing = true,
+    skip: string = '',
     filename: string = '',
   ): Promise<any> {
-  // ): Promise<PdfProcessingResult> {
+    // ): Promise<PdfProcessingResult> {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
@@ -72,9 +73,11 @@ export class FinishScheduleService {
 
       this.logger.log(`Processing file: ${tempFilePath}`);
 
-      let text = '';
+      let text: any = '';
+      let oldText: any = '';
       if (!ocrProcessing) {
-        text = await this.convertPDFToText(tempFilePath);
+        oldText = await this.convertPDFToText(tempFilePath);
+        text = await this.convertPDFToTextByPage(tempFilePath);
       } else {
         const imagePath = await this.convertPDFToImage(tempFilePath);
         text = await this.getTextFromOCR(
@@ -86,13 +89,25 @@ export class FinishScheduleService {
         // );
       }
 
-      const result = await this.processWithPDFText(text, filename);
-      const normalizedResult = normalizeAIResult(result);
+      const result = [];
+
+      for (const [index, pageText] of text.entries()) {
+        this.logger.log(`Processing page ${index + 1}`);
+        const aiResult = await this.processWithPDFText(pageText, filename);
+        result.push(normalizeAIResult(aiResult));
+      }
+
+      // const result = await this.processWithPDFText(text, filename);
       return {
-        wowee: "woee",
+        oldText: oldText,
         text: text,
+        count: Array.isArray(result)
+          ? result.length
+          : result
+            ? 1
+            : 0,
         success: true,
-        data: normalizedResult,
+        data: result,
       };
     } catch (error) {
       console.error('Error processing PDF:', error);
@@ -190,6 +205,41 @@ export class FinishScheduleService {
     return text;
   }
 
+
+  /**
+   * Convert PDF to array of texts divided by pages for AI processing
+   */
+  private async convertPDFToTextByPage(filePath: string): Promise<string[]> {
+    const buffer = await fs.readFile(filePath);
+
+    const data = await pdfParse(buffer);
+
+    const pageLengths: number[] = [];
+
+    await pdfParse(buffer, {
+      pagerender: async (pageData) => {
+        const tc = await pageData.getTextContent();
+        const pageText = tc.items.map((i: any) => i.str).join('');
+        pageLengths.push(pageText.length);
+        return pageText;
+      }
+    });
+
+    const pages: string[] = [];
+    let offset = 0;
+
+    for (const len of pageLengths) {
+      pages.push(data.text.slice(offset, offset + len));
+      offset += len;
+    }
+
+    if (offset < data.text.length) {
+      pages.push(data.text.slice(offset));
+    }
+
+    return pages;
+  }
+
   /**
    * Give AI text and get parsing results
    */
@@ -228,19 +278,15 @@ export class FinishScheduleService {
       }
 
       const aiResponse = await response.json();
+      console.log('AI RESPONSE RAW:', aiResponse.choices[0].message);
+
       const content = aiResponse.choices[0].message.content.trim();
 
       const usage = aiResponse.usage;
 
-      // await sendTelegramMessage('WWJWJWJWJ');
-      // await sendTelegramMessage(
-      //   `${filename} = ${calcCost('gpt-4o', usage.prompt_tokens, usage.completion_tokens)}`,
-      // );
-
       await fs.mkdir('/app/temp/calculation', {
         recursive: true,
       });
-      console.log('OWOJEFHNOJEBNFEFKJ');
       await fs.writeFile(
         `/app/temp/calculation/${filename}.json`,
         JSON.stringify(
@@ -258,8 +304,6 @@ export class FinishScheduleService {
         ),
         'utf-8',
       );
-      console.log('OWOJEFHNOJEBNFEFK224234234234J');
-
       await fs.mkdir(`${COMPARISON_RESULTS_FOLDER}/`, {
         recursive: true,
       });
@@ -315,18 +359,33 @@ export class FinishScheduleService {
   private buildVisionPrompt(image?: boolean): string {
     const basePrompt = `
       You are an expert in extracting structured data from DataSheets and technical documents.
-      Extract the relevant fields from the provided document images or text and return them in JSON format.
-
+      Extract the relevant fields from the provided document text and return them in JSON format.
+      Extract every product defined in the document.
       Document may contain multiple products. Each variant of a product should be represented as a separate entry in the JSON array.
 
       If a field is not present, use an empty string for that field.
 
       If the document does not contain any relevant finish schedule data, respond with "not_found".
 
-      Fields to extract:
+      The fields to extract for each product are:
+      collection, name, productNumber, ColorName, ColorNumber, Size, Shape, Backing, Length, LengthM, Width, WidthM
+      `;
 
-      productTypeId, collection, name, productNumber, Size, specSheet, Material,	FirePerformance`;
-
+    // Example of a product entry:
+    // {
+    //   "collection": "Modular",
+    //   "name": "2ndPower II",
+    //   "productNumber": "11648",
+    //   "ColorName": "STORMTROOPER",
+    //   "ColorNumber": "71607",
+    //   "Size": "36\" x 18\"",
+    //   "Shape": "Tile",
+    //   "Backing": "ethos Modular with Omnicoat Technology",
+    //   "Length": "36",
+    //   "LengthM": "in",
+    //   "Width": "18",
+    //   "WidthM": "in"
+    // }
     return basePrompt;
   }
 
@@ -391,7 +450,6 @@ export class FinishScheduleService {
         const errorText = await response.text();
         throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
       }
-
       const aiResponse = await response.json();
       const content = aiResponse.choices[0].message.content.trim();
 
