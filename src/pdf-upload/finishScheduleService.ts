@@ -20,8 +20,6 @@ export class FinishScheduleService {
   private readonly logger = new Logger(FinishScheduleService.name);
 
   constructor(private configService?: ConfigService) {
-    // this.openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
-    //process.env.OPEN_API_KEY
     this.openaiApiKey = process.env.OPEN_API_KEY;
     this.initTempDir();
   }
@@ -40,10 +38,9 @@ export class FinishScheduleService {
   async processPdfFinishSchedule(
     file: Express.Multer.File,
     ocrProcessing = true,
-    skip: string = '',
+    // skip: string = '',
     filename: string = '',
   ): Promise<any> {
-    // ): Promise<PdfProcessingResult> {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
@@ -74,10 +71,8 @@ export class FinishScheduleService {
       this.logger.log(`Processing file: ${tempFilePath}`);
 
       let text: any = '';
-      let oldText: any = '';
       if (!ocrProcessing) {
-        oldText = await this.convertPDFToText(tempFilePath);
-        text = await this.convertPDFToTextByPage(tempFilePath);
+        text = await this.convertPDFToText(tempFilePath);
       } else {
         const imagePath = await this.convertPDFToImage(tempFilePath);
         text = await this.getTextFromOCR(
@@ -99,7 +94,6 @@ export class FinishScheduleService {
 
       // const result = await this.processWithPDFText(text, filename);
       return {
-        oldText: oldText,
         text: text,
         count: Array.isArray(result)
           ? result.length
@@ -370,30 +364,8 @@ export class FinishScheduleService {
       The fields to extract for each product are:
       collection, name, productNumber, ColorName, ColorNumber, Size, Shape, Backing, Length, LengthM, Width, WidthM
       `;
-
-    // Example of a product entry:
-    // {
-    //   "collection": "Modular",
-    //   "name": "2ndPower II",
-    //   "productNumber": "11648",
-    //   "ColorName": "STORMTROOPER",
-    //   "ColorNumber": "71607",
-    //   "Size": "36\" x 18\"",
-    //   "Shape": "Tile",
-    //   "Backing": "ethos Modular with Omnicoat Technology",
-    //   "Length": "36",
-    //   "LengthM": "in",
-    //   "Width": "18",
-    //   "WidthM": "in"
-    // }
     return basePrompt;
   }
-
-  //  Manufacturer, ProductName,
-  //     Base, Coverage, IntendedUse, WetThickness, DryThickness, CoatingType, HumidityResistance, 
-  //     Finish, collection, name, productNumber, imageFile, ColorName, ColorNumber, Size, specSheet, 
-  //     msdsSheet, msdsSheet1, msdsSheet2, msdsSheet3, msdsSheet4, msdsSheet5, productTypeId, 
-  //     installationSheet, URL, SKU, tagsKeywords, Volume, VolumeM, productId
 
   /**
    * Process PDF images with AI vision to get structured data
